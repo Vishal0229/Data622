@@ -1,0 +1,188 @@
+---
+title: "KT_11-15_Vishal Arora"
+author: "Vishal Arora"
+date: "11/13/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(dplyr)
+library(kableExtra)
+library(ggplot2)
+library(ipred)
+library(ROCR)
+library(e1071)
+library(pROC)
+library(class)
+```
+
+
+```{r}
+
+
+
+df <- read.csv("data_hw1_622.csv", header = TRUE, sep =",") 
+str(df)
+# printing the top 5 rows of the data frame.
+kable(head(df)) %>% 
+  kable_styling(bootstrap_options = c("striped","hover","condensed","responsive"),full_width   = F,position = "left",font_size = 12) %>%
+  row_spec(0, background ="gray") 
+
+ggplot(df,aes(y=Y,x=X,color=label)) + geom_point()
+```
+The data has 36 rows and 3 columns , out of which columns 'Y' and 'label' are Character and column 'X' is int, but all the columns are categorical in nature and hence can be converted to factors  to be consistent.                                                                         
+
+### Conversion & summarizing data                                                           
+
+
+```{r}
+df$X = as.factor(df$X)
+df$Y = as.factor(df$Y)
+df$label = as.factor(df$label)
+#df[sapply(df, is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+# summary statistics of the columns
+summary(df)
+str(df)
+```
+
+## Splitting Data & Models                                             
+```{r}
+#setting seed number
+set.seed(53)
+
+
+
+trainidx<-sample(1:nrow(df) , size=round(0.77*nrow(df)),replace=F) 
+train_set <- df[trainidx,]
+test_set <- df[-trainidx,]
+
+ggplot(train_set,aes(y=Y,x=X,color=label)) + geom_point()
+
+ggplot(test_set,aes(y=Y,x=X,color=label)) + geom_point()
+
+
+```
+                                    
+## Bagging                                                
+
+```{r}
+# Bagging
+trainBgModel <- bagging(label ~ ., data=train_set, nbagg = 100, coob = TRUE)
+trainBgModel
+
+confMat_train <- table(predict(trainBgModel), train_set$label)
+confMat_train
+
+testbag = predict(trainBgModel, newdata=test_set)
+confusionMat_bg <- table(testbag, test_set$label)
+confusionMat_bg
+
+
+```
+
+```{r}
+# Calculating  the ACC,TPR,FPR,TNR & FNR from confusion matrix
+acc_bag <- sum(diag(confusionMat_bg)) / sum(confusionMat_bg)
+tpr_bag <- confusionMat_bg[1,1]/sum(confusionMat_bg[1,1], confusionMat_bg[2,1])
+fpr_bag <- confusionMat_bg[1,2]/sum(confusionMat_bg[1,2], confusionMat_bg[2,2])
+tnr_bag <- confusionMat_bg[2,2]/sum(confusionMat_bg[2,2], confusionMat_bg[1,2]) 
+fnr_bag <- confusionMat_bg[2,1]/sum(confusionMat_bg[2,1], confusionMat_bg[1,1])
+auc_bag <- auc(roc(testbag, ifelse(test_set$label == 'BLUE', 1, 0)))
+
+Bgrow <- c("Bagging ",round(auc_bag,2), round(acc_bag,2),round(tpr_bag,2),round(fpr_bag,2), round(tnr_bag,2),round(fnr_bag,2))
+
+Bgrow
+
+resMatrix <- data.frame(matrix(ncol = 6, nrow = 0))
+resMatrix <- rbind(resMatrix,Bgrow)
+colnames(resMatrix) <- c("ALGO", "AUC","ACC", "TPR", "FPR", "TNR ", "FNR")
+
+```
+                                             
+## LOOCV                      
+
+### GLM                       
+
+```{r  message=FALSE, warning=FALSE, paged.print=FALSE}
+
+data <- df
+acc <- NULL
+for(i in 1:nrow(data))
+{
+    # Train-test splitting
+    # 35 samples -> fitting
+    # 1 sample -> testing
+    train <- data[-i,]
+    test <- data[i,]
+    
+    
+    # Fitting
+    model <- glm(label~.,family=binomial,data=train)
+    pred_glm <- predict(model,test,type='response')
+   
+   # If prob > 0.5 then 1, else 0
+    results <- ifelse(pred_glm > 0.5,"BLUE","BLACK")
+    
+    # Actual answers
+    answers <- test$label
+   
+    # Calculate accuracy
+    misClasificError <- mean(answers != results)
+    
+    # Collecting results
+    acc[i] <- 1-misClasificError
+    
+    
+}
+
+# Average accuracy of the model
+
+mean(acc)
+
+
+```
+                                        
+
+### NB                                   
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+data <- df
+acc <- NULL
+for(i in 1:nrow(data))
+{
+    # Train-test splitting
+    # 35 samples -> fitting
+    # 1 sample -> testing
+    train <- data[-i,]
+    test <- data[i,]
+    
+    
+    # Fitting
+    model <- naiveBayes(label~.,data=train)
+    pred_nb <- predict(model,test,type='raw')
+   
+   # If prob > 0.5 then 1, else 0
+    results <- ifelse(pred_nb > 0.5,"BLUE","BLACK")
+    
+    # Actual answers
+    answers <- test$label
+   
+    # Calculate accuracy
+    misClasificError <- mean(answers != results)
+    
+    # Collecting results
+    acc[i] <- 1-misClasificError
+}
+
+mean(acc)
+```
+## Conclusion:
+
+ The accuracy for Bagging and LOOCV( GLM ) has increased but still in the overall run the KNN=3 from original model has the most accuracy . The LOOVC (NB) has shown a degrading performance in respect to original NB model.Bagging is a method to reduce overfitting. You train many models on resampled data and then take their average to get an averaged model. One disadvantage of bagging is that it introduces a loss of interpretability of a model. The resultant model can experience lots of bias when the proper procedure is ignored. 
+ 
+ 
