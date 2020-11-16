@@ -1,0 +1,243 @@
+---
+title: "Assignment1"
+author: "Vishal Arora"
+date: "10/10/2020"
+output:
+  word_document: default
+  pdf_document: default
+  always_allow_html: true
+---
+# Assignment 1 - Data 622
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(dplyr)
+library(kableExtra)
+library(caret)
+library(psych)
+library(ROCR)
+library(e1071)
+library(pROC)
+library(class)
+library(ggplot2)
+```
+## Data Loading and data visualization 
+
+```{r}
+df <- read.csv("data_hw1_622.csv", header = TRUE, sep =",") 
+# checking data structure
+str(df)
+# printing the top 5 rows of the data frame.
+kable(head(df)) %>% 
+  kable_styling(bootstrap_options = c("striped","hover","condensed","responsive"),full_width   = F,position = "left",font_size = 12) %>%
+  row_spec(0, background ="gray") 
+
+ggplot(df,aes(y=Y,x=X,color=label)) + geom_point()
+```
+                                                     
+The data has 36 rows and 3 columns , out of which columns 'Y' and 'label' are Character and column 'X' is int, but all the columns are categorical in nature and hence can be converted to factors  to be consistent.                                    
+
+### Conversion & summarizing data
+```{r}
+df$X = as.factor(df$X)
+df$Y = as.factor(df$Y)
+df$label = as.factor(df$label)
+#df[sapply(df, is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+
+# summary statistics of the columns
+summary(df)
+str(df)
+
+
+```
+                                        
+The data is moderately imbalanced  BLACK:BLUE ratio is 60:40.                                              
+
+## Splitting Data & Models                     
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#setting seed number
+set.seed(53)
+
+
+
+trainidx<-sample(1:nrow(df) , size=round(0.77*nrow(df)),replace=F) 
+train_set <- df[trainidx,]
+test_set <- df[-trainidx,]
+
+prop.table(table(train_set$label)) * 100
+prop.table(table(test_set$label)) * 100
+
+ggplot(train_set,aes(y=Y,x=X,color=label)) + geom_point()
+
+ggplot(test_set,aes(y=Y,x=X,color=label)) + geom_point()
+
+```
+
+
+```{r}
+
+
+# Logistic Regression
+fit1 <- glm(label ~ ., data = train_set, family = "binomial")
+summary(fit1)
+pred_glm <- predict(fit1, test_set, type = 'response')
+pred_glm_label <- ifelse(pred_glm > 0.5,1,2) 
+confuMatrix_LR = table(pred_glm_label, test_set$label)
+
+# Calculating  the ACC,TPR,FPR,TNR & FNR from confusion matrix
+acc_LR <- sum(diag(confuMatrix_LR)) / sum(confuMatrix_LR)
+tpr_LR <- confuMatrix_LR[1,1]/sum(confuMatrix_LR[1,1], confuMatrix_LR[2,1])
+fpr_LR <- confuMatrix_LR[1,2]/sum(confuMatrix_LR[1,2], confuMatrix_LR[2,2])
+tnr_LR <- confuMatrix_LR[2,2]/sum(confuMatrix_LR[2,2], confuMatrix_LR[1,2]) 
+fnr_LR <- confuMatrix_LR[2,1]/sum(confuMatrix_LR[2,1], confuMatrix_LR[1,1])
+ROCRpred <- prediction(pred_glm, test_set$label)
+ROCRperf <- performance(ROCRpred, 'tpr', 'fpr')
+ROCRperfauc <- performance(ROCRpred, 'auc')
+auc_LR <- ROCRperfauc@y.values[[1]]
+
+# Putting all the values for Logistic regression into a row.
+LRrow <- c("LR ",round(auc_LR,2), round(acc_LR,2),round(tpr_LR,2),round(fpr_LR,2), round(tnr_LR,2),round(fnr_LR,2))
+
+
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Naive Bayes
+set.seed(158)
+fit2 <- naiveBayes(label ~ ., data = train_set,type="class")
+fit2$tables
+nbPred <- predict(fit2, newdata = test_set)
+confuMatrix_NB <- table(nbPred,test_set$label)
+
+# Calculating  the ACC,TPR,FPR,TNR & FNR from confusion matrix
+acc_NB <- sum(diag(confuMatrix_NB)) / sum(confuMatrix_NB)
+tpr_NB <- confuMatrix_NB[1,1]/sum(confuMatrix_NB[1,1], confuMatrix_NB[2,1])
+fpr_NB <- confuMatrix_NB[1,2]/sum(confuMatrix_NB[1,2], confuMatrix_NB[2,2])
+tnr_NB <- confuMatrix_NB[2,2]/sum(confuMatrix_NB[2,2], confuMatrix_NB[1,2]) 
+fnr_NB <- confuMatrix_NB[2,1]/sum(confuMatrix_NB[2,1], confuMatrix_NB[1,1])
+roc_NB <- roc(test_set$label, as.numeric(nbPred))
+auc_NB <- roc_NB$auc
+
+NBrow <- c("NAIVEB",round(auc_NB,2),round(acc_NB,2),round(tpr_NB,2),round(fpr_NB,2), round(tnr_NB,2), round(fnr_NB,2))
+
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# KNN n= 3
+#As library class model for KNN doesn' ttake non-numeric features, hence wewill have to convert Yfeature to numeric.
+set.seed(27)
+data_train_knn<-train_set
+data_train_knn$Y<-apply(as.data.frame(data_train_knn$Y),1,utf8ToInt)
+data_test_knn<-test_set
+data_test_knn$Y<-apply(as.data.frame(data_test_knn$Y),1,utf8ToInt)
+
+fit3 <- class::knn(cl = train_set$label,
+                  test = data_test_knn[,-3],
+                  train = data_train_knn[,-3],
+                  k = 3,
+                  prob = TRUE)
+fit3
+
+confuMatrix_KNN3<-table(fit3,test_set[,3])
+
+# Calculating  the ACC,TPR,FPR,TNR & FNR from confusion matrix
+acc_KNN3 <- sum(diag(confuMatrix_KNN3)) / sum(confuMatrix_KNN3)
+tpr_KNN3 <- confuMatrix_KNN3[1,1]/sum(confuMatrix_KNN3[1,1], confuMatrix_KNN3[2,1])
+fpr_KNN3 <- confuMatrix_KNN3[1,2]/sum(confuMatrix_KNN3[1,2], confuMatrix_KNN3[2,2])
+tnr_KNN3 <- confuMatrix_KNN3[2,2]/sum(confuMatrix_KNN3[2,2], confuMatrix_KNN3[1,2]) 
+fnr_KNN3 <- confuMatrix_KNN3[2,1]/sum(confuMatrix_KNN3[2,1], confuMatrix_KNN3[1,1])
+roc_KNN3 <- roc(test_set$label, as.numeric(fit3))
+auc_KNN3 <- roc_KNN3$auc
+
+KNN3row <- c("KNN3 ",round(auc_KNN3,2),round(acc_KNN3,2),round(tpr_KNN3,2),round(fpr_KNN3,2), round(tnr_KNN3,2),round(fnr_KNN3,2) )
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# KNN n= 5
+set.seed(18)
+fit4 <- class::knn(cl = train_set$label,
+                  test = data_test_knn[,-3],
+                  train = data_train_knn[,-3],
+                  k = 5,
+                  prob = TRUE)
+
+confuMatrix_KNN5<-table(fit4,test_set[,3],dnn=c("Prediction","Actual"))
+
+
+# Calculating  the ACC,TPR,FPR,TNR & FNR from confusion matrix
+acc_KNN5 <- sum(diag(confuMatrix_KNN5)) / sum(confuMatrix_KNN3)
+tpr_KNN5 <- confuMatrix_KNN5[1,1]/sum(confuMatrix_KNN5[1,1], confuMatrix_KNN5[2,1])
+fpr_KNN5 <- confuMatrix_KNN5[1,2]/sum(confuMatrix_KNN5[1,2], confuMatrix_KNN5[2,2])
+tnr_KNN5 <- confuMatrix_KNN5[2,2]/sum(confuMatrix_KNN5[2,2], confuMatrix_KNN5[1,2]) 
+fnr_KNN5 <- confuMatrix_KNN5[2,1]/sum(confuMatrix_KNN5[2,1], confuMatrix_KNN5[1,1])
+roc_KNN5 <- roc(test_set$label, as.numeric(fit4))
+auc_KNN5 <- roc_KNN5$auc
+
+KNN5row <- c("KNN5 ",round(auc_KNN5,2),round(acc_KNN5,2),round(tpr_KNN5,2),round(fpr_KNN5,2), round(tnr_KNN5,2),round(fnr_KNN5,2) )
+
+```
+
+```{r}
+# Results matrix
+
+resMatrix <- data.frame(matrix(ncol = 6, nrow = 0))
+resMatrix <- rbind(resMatrix,LRrow,NBrow,KNN3row,KNN5row)
+colnames(resMatrix) <- c("ALGO", "AUC","ACC", "TPR", "FPR", "TNR ", "FNR")
+
+kable(resMatrix) %>% 
+  kable_styling(bootstrap_options = c("striped","hover","condensed","responsive"),full_width   = F,position = "left",font_size = 12) %>%
+  row_spec(0, background ="gray") 
+```
+
+## Commentary
+**TPR** - True positive rate (sensitivity) tries to find the percentage of true positives where predictions were correctly identified.                       
+
+**FPR** - False positives rate (1 - specificity(True Negative)) tries to find percentage of true positive where prediction is incorrectly identified (Type 1 Errors).                                  
+
+(Specificity and sensitivity are inversely proportional, while TPR and FPR are not.)                       
+
+**Accuracy** - Finds the percentage of true positive and true negatives where predictions were correctly identified.                                      
+
+**AUC** - Area under the curve is the area under the ROC curve when comparing TPR to FPR for several models. The closer the curve is to the upper left corner the better the model classification.                                  
+
+**LR Model** - The GLM linear regression model shows that the accuracy of TP and TN is the lowest among all models at 0.36 while the AUC is the .81. This tells us the model did lower than average job at classfication.                           
+
+**NB Model** - The NB model shows that the accuracy of TP and TN is  0.73 while the AUC is the .75 . This model has done average in terms of Accuracy & Area under Curve.                      
+
+**KNN3 Model** - The KNN , has the highest AUC at .9 and also the accuracy is highest at .88 among all the models. Also the model is quiet good in predicting True Negative and has False Positive rate of 0 which is good. This model has exceeded expectations.  This model also has good rate of predicting True Positive rate among all the models.                                 
+
+**Knn5 Model** - The KNN model where K=5 also has performed better than otger models but lesser than K=3 model, with AUC at .8 and accuracy at .75 .                          
+
+And if we want to go further , then  we can use F-Score to further push the case that NB & KNN-3 are the best models.                     
+
+**F score** is the harmonic mean of precision and recall. It lies between 0 and 1. Higher the value, better the model. It is formulated as 2((precision*recall) / (precision+recall)).                     
+
+Precision= (TP / TP + FP)                    
+
+recall = TPR  
+
+As the dataset is too small, AUC would be preferred measure of classifier performance than accuracy for the following reasons:
+
+ - AUC does not bias on size of evaluation data
+
+ - Also accuracy depends on setting a probability cut-off (for balanced data this is fine, but in the imbalanced case the minority class probabilities may be all below 0.5, while AUC considers the ranking of positives and negative according to probability minority.)
+
+ - Metric like accuracy is calculated based on the class distribution of test dataset or cross-validation, but this ratio may change when we apply the classifier to real life data, because the underlying class distribution has been changed or unknown. On the other hand, TP rate and FP rate which are used to construct AUC will not be affected by class distribution shifting.
+ 
+
+## Classifier Performance differences
+
+A quick look at the scattered plots for the entire dataset and the training and test sets reveals how many samples of different classes intertwined between each other.This makes it harder for several of these classifier to properly assign classes.                      
+
+Also as the Dataset is small , thus as expected the performance of the Logistic Regression model is poor, and NB performance is good with small dataset.                                 
+
+The suprising part is that KNN (k=3) is top most performing model this is due to the  small data set  and KNN is a  non-parametrised algorithm
+
